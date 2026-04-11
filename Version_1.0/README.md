@@ -57,29 +57,30 @@ A low-cost 2D scanning system built using **ESP32 + dual VL53L0X sensors + servo
 ```
 
 🧭 Full Scan
-
+```json
 {"t":"s","pts":[[0,300],[1,320]]}
-
+```
 🛠️ Configuration
-
+```cpp
 #define STEP_DEG    2      // resolution (1 = high detail, slower)
 #define STEP_DELAY  15     // ms delay per step
 #define MAX_DIST    2000   // max valid distance (mm)
+```
 📡 WebSocket
-
+```cpp
 Runs on port: 81
-
+```
 Connect via:
-
+```cpp
 ws://<ESP32_IP>:81
-
+```
 ▶️ How to Run
 Flash code to ESP32
 Set your WiFi credentials:
-
-`const char* SSID = "your_wifi";`
-`const char* PASSWORD = "your_password";`
-
+```cpp
+const char* SSID = "your_wifi";
+const char* PASSWORD = "your_password";
+```
 Open Serial Monitor → note IP
 Connect from browser UI
 
