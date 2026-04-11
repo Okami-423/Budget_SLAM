@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Room Scanner</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:      #060a10;
+    --panel:   #0b1120;
+    --border:  #1a2d4a;
+    --cyan:    #00e5ff;
+    --green:   #00ff88;
+    --amber:   #ffaa00;
+    --red:     #ff3355;
+    --text:    #7eb8d4;
+    --dim:     #2a4a62;
+    --sweep:   rgba(0,229,255,0.18);
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+  }
+
+  /* ── Layout ── */
+  .shell {
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    grid-template-columns: 1fr 220px;
+    height: 100vh;
+    gap: 0;
+  }
+
+  /* ── Header ── */
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--cyan);
+    text-transform: uppercase;
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background .3s, box-shadow .3s;
+  }
+  .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot.scanning { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse .6s ease-in-out infinite alternate; }
+  .dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  @keyframes pulse { from { opacity:.5; } to { opacity:1; } }
+
+  #status-text {
+    font-size: 11px;
+    color: var(--text);
+    opacity: .7;
+    margin-left: 4px;
+  }
+
+  /* ── Canvas area ── */
+  .canvas-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  canvas { display: block; }
+
+  /* Sweep line overlay */
+  #sweep-line {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 2px;
+    transform-origin: top center;
+    background: linear-gradient(to bottom, var(--cyan), transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .15s;
+  }
+  #sweep-line.active { opacity: 1; }
+
+  /* ── Sidebar ── */
+  aside {
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .side-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  /* IP input */
+  .ip-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  input[type="text"] {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    outline: none;
+    width: 0;
+  }
+  input[type="text"]:focus { border-color: var(--cyan); }
+
+  button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: border-color .2s, color .2s;
+    white-space: nowrap;
+  }
+  button:hover { border-color: var(--cyan); color: var(--cyan); }
+  button.danger:hover { border-color: var(--red); color: var(--red); }
+
+  /* Stats */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 8px 6px;
+  }
+  .stat-box .val {
+    font-size: 18px;
+    color: var(--cyan);
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 400;
+    line-height: 1;
+  }
+  .stat-box .lbl {
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+
+  /* Log */
+  .log {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 10px;
+    color: var(--dim);
+    overflow-y: auto;
+    min-height: 80px;
+    max-height: 140px;
+    display: flex;
+    flex-direction: column-reverse;
+  }
+  .log .entry { line-height: 1.6; }
+  .log .entry.ok  { color: var(--green); }
+  .log .entry.err { color: var(--red); }
+  .log .entry.inf { color: var(--amber); }
+
+  /* Toggles */
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle-row input { display: none; }
+  .toggle-track {
+    width: 28px; height: 16px;
+    background: var(--border);
+    border-radius: 8px;
+    position: relative;
+    transition: background .2s;
+  }
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    width: 10px; height: 10px;
+    background: var(--dim);
+    border-radius: 50%;
+    top: 3px; left: 3px;
+    transition: transform .2s, background .2s;
+  }
+  input:checked + .toggle-track { background: rgba(0,229,255,.2); }
+  input:checked + .toggle-track::after { transform: translateX(12px); background: var(--cyan); }
+
+  /* Range slider */
+  input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    outline: none;
+    border-radius: 1px;
+    margin-top: 6px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--cyan);
+    cursor: pointer;
+  }
+
+  @media (max-width: 540px) {
+    .shell { grid-template-columns: 1fr; grid-template-rows: 48px 1fr auto; }
+    aside { grid-row: 3; border-left: none; border-top: 1px solid var(--border); flex-direction: row; flex-wrap: wrap; max-height: 200px; overflow-y: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header>
+    <h1>Room Scanner</h1>
+    <div class="dot" id="dot"></div>
+    <span id="status-text">disconnected</span>
+  </header>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="map"></canvas>
+    <div id="sweep-line"></div>
+  </div>
+
+  <aside>
+    <div>
+      <div class="side-label">ESP32 address</div>
+      <div class="ip-row">
+        <input type="text" id="ipInput" value="192.168.1.100" placeholder="ESP32 IP"/>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button id="connectBtn" onclick="toggleConnect()" style="flex:1">Connect</button>
+        <button class="danger" onclick="clearMap()">Clear</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="side-label">Stats</div>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="val" id="statPts">0</div><div class="lbl">POINTS</div></div>
+        <div class="stat-box"><div class="val" id="statScans">0</div><div class="lbl">SCANS</div></div>
+        <div class="stat-box"><div class="val" id="statMin">—</div><div class="lbl">MIN MM</div></div>
+        <div class="stat-box"><div class="val" id="statMax">—</div><div class="lbl">MAX MM</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="side-label">Display</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label class="toggle-row">
+          <span>Grid rings</span>
+          <input type="checkbox" id="togGrid" checked onchange="redraw()">
+          <span class="toggle-track"></span>
+        </label>
+        <label class="toggle-row">
+          <span>Fill polygon</span>
+          <input type="checkbox" id="togFill" checked onchange="redraw()">
+          <span class="toggle-track"></span>
+        </label>
+        <label class="toggle-row">
+          <span>Trail fade</span>
+          <input type="checkbox" id="togTrail" checked onchange="redraw()">
+          <span class="toggle-track"></span>
+        </label>
+        <label class="toggle-row">
+          <span>Sweep line</span>
+          <input type="checkbox" id="togSweep" checked>
+          <span class="toggle-track"></span>
+        </label>
+        <div style="font-size:11px">Scale
+          <input type="range" id="scaleSlider" min="50" max="500" value="200" oninput="updateScale(this.value)">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="side-label">Log</div>
+      <div class="log" id="log"></div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+let ws = null;
+let scanData    = new Array(360).fill(0);   // current scan
+let trailData   = new Array(360).fill(0);   // previous scan (for fade)
+let scanCount   = 0;
+let maxMmScale  = 200;   // mm per "radius unit" — matches slider
+let sweepAngle  = null;
+let animFrame   = null;
+let isConnected = false;
+
+const canvas  = document.getElementById('map');
+const ctx     = canvas.getContext('2d');
+const wrap    = document.getElementById('canvasWrap');
+const sweepEl = document.getElementById('sweep-line');
+
+// ── Canvas resize ──────────────────────────────────────────────────────────────
+function resize() {
+  const s = Math.min(wrap.clientWidth, wrap.clientHeight) - 20;
+  canvas.width  = s;
+  canvas.height = s;
+  sweepEl.style.height = (s / 2) + 'px';
+  redraw();
+}
+window.addEventListener('resize', resize);
+
+// ── Coordinate helpers ────────────────────────────────────────────────────────
+function polar(angleDeg, distMm) {
+  const S   = canvas.width / 2;
+  const CX  = S, CY = S;
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  const r   = (distMm / maxMmScale) * (S - 30);
+  return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
+}
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
+function redraw() {
+  const S  = canvas.width;
+  const CX = S / 2, CY = S / 2;
+  const R  = CX - 30;
+
+  ctx.clearRect(0, 0, S, S);
+
+  // Background
+  ctx.fillStyle = '#060a10';
+  ctx.fillRect(0, 0, S, S);
+
+  // Grid rings
+  if (document.getElementById('togGrid').checked) {
+    const rings = [0.25, 0.5, 0.75, 1.0];
+    rings.forEach((f, i) => {
+      ctx.beginPath();
+      ctx.arc(CX, CY, R * f, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0,100,160,0.2)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      // distance label
+      const mm = Math.round(maxMmScale * f * 2);
+      ctx.fillStyle = 'rgba(0,150,200,0.3)';
+      ctx.font = '9px Share Tech Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(mm + 'mm', CX + 4, CY - R * f + 11);
+    });
+    // Cardinal spokes
+    [0, 45, 90, 135].forEach(a => {
+      const rad = a * Math.PI / 180;
+      ctx.beginPath();
+      ctx.moveTo(CX, CY);
+      ctx.lineTo(CX + Math.cos(rad) * R, CY + Math.sin(rad) * R);
+      ctx.moveTo(CX, CY);
+      ctx.lineTo(CX - Math.cos(rad) * R, CY - Math.sin(rad) * R);
+      ctx.strokeStyle = 'rgba(0,100,160,0.12)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    });
+    // NESW labels
+    ctx.fillStyle = 'rgba(0,200,255,0.25)';
+    ctx.font = '10px Share Tech Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('N', CX, 16);
+    ctx.fillText('S', CX, S - 4);
+    ctx.textAlign = 'left';
+    ctx.fillText('E', S - 16, CY + 4);
+    ctx.textAlign = 'right';
+    ctx.fillText('W', 16, CY + 4);
+  }
+
+  // Trail (previous scan, dimmed)
+  if (document.getElementById('togTrail').checked) {
+    const hasTrail = trailData.some(v => v > 0);
+    if (hasTrail) drawPolygon(trailData, 'rgba(0,150,80,0.08)', 'rgba(0,150,80,0.2)', 1);
+  }
+
+  // Fill polygon for current scan
+  if (document.getElementById('togFill').checked) {
+    drawPolygon(scanData, 'rgba(0,229,255,0.07)', 'rgba(0,229,255,0.5)', 1.5);
+  }
+
+  // Dots
+  ctx.fillStyle = '#00ff88';
+  for (let a = 0; a < 360; a++) {
+    const d = scanData[a];
+    if (d < 30) continue;
+    const [x, y] = polar(a, d);
+    ctx.beginPath();
+    ctx.arc(x, y, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Sweep line live dot
+  if (sweepAngle !== null) {
+    const d0 = scanData[sweepAngle] || 50;
+    const [sx, sy] = polar(sweepAngle, d0);
+    ctx.beginPath();
+    ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#00e5ff';
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // Center dot
+  ctx.beginPath();
+  ctx.arc(CX, CY, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#185FA5';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(CX, CY, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = '#00e5ff';
+  ctx.fill();
+}
+
+function drawPolygon(data, fill, stroke, lw) {
+  ctx.beginPath();
+  let first = true;
+  for (let a = 0; a < 360; a++) {
+    if (data[a] < 30) continue;
+    const [x, y] = polar(a, data[a]);
+    if (first) { ctx.moveTo(x, y); first = false; }
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = lw;
+  ctx.stroke();
+}
+
+// ── Sweep line CSS animation ──────────────────────────────────────────────────
+function updateSweepLine(angleDeg) {
+  if (!document.getElementById('togSweep').checked) return;
+  // Convert bearing (0=North, CW) → CSS rotation (0=up, CW)
+  sweepEl.style.transform = `rotate(${angleDeg}deg)`;
+  sweepEl.classList.add('active');
+}
+
+function hideSweepLine() {
+  sweepEl.classList.remove('active');
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const pts = scanData.filter(v => v > 30);
+  document.getElementById('statPts').textContent  = pts.length;
+  document.getElementById('statScans').textContent = scanCount;
+  if (pts.length) {
+    document.getElementById('statMin').textContent = Math.min(...pts);
+    document.getElementById('statMax').textContent = Math.max(...pts);
+  }
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function log(msg, cls = '') {
+  const el  = document.getElementById('log');
+  const div = document.createElement('div');
+  div.className = 'entry ' + cls;
+  div.textContent = new Date().toLocaleTimeString('en', {hour12: false}) + ' ' + msg;
+  el.prepend(div);
+  while (el.children.length > 40) el.removeChild(el.lastChild);
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function toggleConnect() {
+  isConnected ? disconnect() : connect();
+}
+
+function connect() {
+  const raw  = document.getElementById('ipInput').value.trim();
+  const host = raw.replace(/:\d+$/, '');   // strip any port the user may have typed
+  const url  = `ws://${host}:81`;
+  log(`connecting to ${url}…`, 'inf');
+  setStatus('connecting');
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    isConnected = true;
+    setStatus('live');
+    document.getElementById('connectBtn').textContent = 'Disconnect';
+    log('connected', 'ok');
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'point') {
+        // Live point during sweep
+        const a = msg.a, d = msg.d;
+        scanData[a] = d;
+        sweepAngle  = a;
+        updateSweepLine(a);
+        redraw();
+      } else if (msg.type === 'scan') {
+        // Full scan complete
+        trailData = [...scanData];
+        scanData  = new Array(360).fill(0);
+        for (const [a, d] of msg.points) scanData[a] = d;
+        scanCount++;
+        sweepAngle = null;
+        hideSweepLine();
+        updateStats();
+        redraw();
+        log(`scan #${scanCount} — ${msg.points.length} pts`, 'ok');
+      } else if (msg.type === 'status') {
+        log(msg.msg, 'inf');
+        if (msg.msg === 'scanning') {
+          // Clear current for fresh paint
+          trailData = [...scanData];
+          scanData  = new Array(360).fill(0);
+        }
+      }
+    } catch(err) { log('parse error: ' + err.message, 'err'); }
+  };
+
+  ws.onerror = () => { log('WebSocket error', 'err'); setStatus('error'); };
+
+  ws.onclose = () => {
+    isConnected = false;
+    setStatus('off');
+    document.getElementById('connectBtn').textContent = 'Connect';
+    hideSweepLine();
+    log('disconnected');
+  };
+}
+
+function disconnect() {
+  if (ws) ws.close();
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function setStatus(state) {
+  const dot  = document.getElementById('dot');
+  const txt  = document.getElementById('status-text');
+  dot.className = 'dot';
+  const map = {
+    live:       ['live',     'connected — live'],
+    scanning:   ['scanning', 'scanning…'],
+    connecting: ['scanning', 'connecting…'],
+    error:      ['error',    'error'],
+    off:        ['',         'disconnected'],
+  };
+  const [cls, label] = map[state] || ['', state];
+  if (cls) dot.classList.add(cls);
+  txt.textContent = label;
+}
+
+function clearMap() {
+  scanData  = new Array(360).fill(0);
+  trailData = new Array(360).fill(0);
+  scanCount = 0;
+  updateStats();
+  redraw();
+  log('cleared');
+}
+
+function updateScale(v) {
+  maxMmScale = parseInt(v) * 2;
+  redraw();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+resize();
+log('open — enter ESP32 IP and connect');
+</script>
+</body>
+</html>
